@@ -5,20 +5,38 @@ import PackageDescription
 
 let package = Package(
     name: "OfflineMapTiles",
+    platforms: [
+        .iOS(.v13),
+        .macOS(.v10_15),
+        .watchOS(.v6),
+        .tvOS(.v13)
+    ],
     products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
             name: "OfflineMapTiles",
             targets: ["OfflineMapTiles"]),
     ],
+    dependencies: [
+        // Add dependencies here if needed in the future
+    ],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
         .target(
-            name: "OfflineMapTiles"),
+            name: "OfflineMapTiles",
+            dependencies: [],
+            path: "Sources/OfflineMapTiles",
+            swiftSettings: [
+                .enableUpcomingFeature("BareSlashRegexLiterals"),
+                .enableUpcomingFeature("ConciseMagicFile"),
+                .enableUpcomingFeature("ForwardTrailingClosures"),
+                .enableUpcomingFeature("ImplicitOpenExistentials"),
+                .enableUpcomingFeature("StrictConcurrency"),
+            ]
+        ),
         .testTarget(
             name: "OfflineMapTilesTests",
-            dependencies: ["OfflineMapTiles"]
+            dependencies: ["OfflineMapTiles"],
+            path: "Tests/OfflineMapTilesTests"
         ),
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )

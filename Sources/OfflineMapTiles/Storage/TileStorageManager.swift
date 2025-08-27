@@ -64,6 +64,41 @@ internal final class TileStorageManager: @unchecked Sendable {
         }
     }
     
+    func saveTile(coordinate: TileCoordinate, data: Data, configName: String) async throws {
+        let url = tileURL(for: coordinate, configName: configName)
+        
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            queue.async(flags: .barrier) {
+                do {
+                    let directory = url.deletingLastPathComponent()
+                    try self.fileManager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+                    
+                    try data.write(to: url, options: .atomic)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: OfflineMapTilesError.fileSystemError(error))
+                }
+            }
+        }
+        
+        await checkCacheSizeAndCleanup()
+    }
+    
+    func getTile(coordinate: TileCoordinate, configName: String) async -> Data? {
+        let url = tileURL(for: coordinate, configName: configName)
+        
+        return await withCheckedContinuation { continuation in
+            queue.async {
+                do {
+                    let data = try Data(contentsOf: url)
+                    continuation.resume(returning: data)
+                } catch {
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+    
     func tileExists(coordinate: TileCoordinate) async -> Bool {
         let url = tileURL(for: coordinate)
         
@@ -192,6 +227,14 @@ internal final class TileStorageManager: @unchecked Sendable {
     
     private func tileURL(for coordinate: TileCoordinate) -> URL {
         return baseURL
+            .appendingPathComponent("\(coordinate.zoom)")
+            .appendingPathComponent("\(coordinate.x)")
+            .appendingPathComponent("\(coordinate.y).\(tileFormat.rawValue)")
+    }
+    
+    private func tileURL(for coordinate: TileCoordinate, configName: String) -> URL {
+        return baseURL
+            .appendingPathComponent(configName)
             .appendingPathComponent("\(coordinate.zoom)")
             .appendingPathComponent("\(coordinate.x)")
             .appendingPathComponent("\(coordinate.y).\(tileFormat.rawValue)")

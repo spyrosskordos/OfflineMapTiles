@@ -8,6 +8,7 @@ public enum OfflineMapTilesError: Error, LocalizedError {
     case downloadCancelled
     case storageQuotaExceeded
     case invalidZoomLevel
+    case tileOutOfBounds
     case unsupportedTileFormat
     case downloadSizeExceedsLimit(SizeEstimationError)
     
@@ -27,6 +28,8 @@ public enum OfflineMapTilesError: Error, LocalizedError {
             return "Storage quota exceeded"
         case .invalidZoomLevel:
             return "Zoom level is outside the supported range for this tile server"
+        case .tileOutOfBounds:
+            return "Tile coordinates are outside the server's coverage bounds"
         case .unsupportedTileFormat:
             return "Unsupported tile format"
         case .downloadSizeExceedsLimit(let sizeError):

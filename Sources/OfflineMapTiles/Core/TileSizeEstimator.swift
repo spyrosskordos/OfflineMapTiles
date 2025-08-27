@@ -1,7 +1,7 @@
 import Foundation
 
-internal final class TileSizeEstimator: @unchecked Sendable {
-    private let tileCalculator: TileCalculator
+public final class TileSizeEstimator: @unchecked Sendable {
+    private let tileCalculator: TileCalculatorProtocol
     private let maxDownloadSize: Int64 = 600 * 1024 * 1024 // 600MB
     
     // Average tile sizes in bytes based on format and content type
@@ -13,7 +13,7 @@ internal final class TileSizeEstimator: @unchecked Sendable {
         .mvt: 3_000       // ~3KB for vector tiles
     ]
     
-    init(tileCalculator: TileCalculator) {
+    init(tileCalculator: TileCalculatorProtocol) {
         self.tileCalculator = tileCalculator
     }
     

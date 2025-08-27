@@ -8,7 +8,7 @@ public enum TileFormat: String, CaseIterable, Sendable {
     case mvt = "mvt"
 }
 
-public struct TileServerConfig: Sendable {
+public struct TileServerConfig: TileServerConfigProtocol, Sendable {
     public let name: String
     public let baseURL: String
     public let format: TileFormat
@@ -17,7 +17,8 @@ public struct TileServerConfig: Sendable {
     public let attribution: String?
     public let apiKey: String?
     public let customHeaders: [String: String]
-    public let retryPolicy: RetryPolicy
+    private let _retryPolicy: RetryPolicy
+    public let bounds: MapBounds?
     
     public init(
         name: String,
@@ -28,7 +29,8 @@ public struct TileServerConfig: Sendable {
         attribution: String? = nil,
         apiKey: String? = nil,
         customHeaders: [String: String] = [:],
-        retryPolicy: RetryPolicy = .default
+        retryPolicy: RetryPolicy = .default,
+        bounds: MapBounds? = nil
     ) {
         self.name = name
         self.baseURL = baseURL
@@ -38,7 +40,8 @@ public struct TileServerConfig: Sendable {
         self.attribution = attribution
         self.apiKey = apiKey
         self.customHeaders = customHeaders
-        self.retryPolicy = retryPolicy
+        self._retryPolicy = retryPolicy
+        self.bounds = bounds
     }
     
     public func tileURL(for coordinate: TileCoordinate) -> String {
@@ -94,9 +97,38 @@ public struct TileServerConfig: Sendable {
         }
         return quadkey
     }
+    
+    public func isCoordinateInBounds(_ coordinate: TileCoordinate) -> Bool {
+        guard let bounds = self.bounds else {
+            return true
+        }
+        
+        let calculator = DefaultTileCalculator()
+        let tileToCoordinate = calculator.tileToCoordinate(tile: coordinate)
+        
+        return tileToCoordinate.latitude <= bounds.northEast.latitude &&
+               tileToCoordinate.latitude >= bounds.southWest.latitude &&
+               tileToCoordinate.longitude >= bounds.southWest.longitude &&
+               tileToCoordinate.longitude <= bounds.northEast.longitude
+    }
 }
 
-public struct RetryPolicy: Sendable {
+// MARK: - TileServerConfigProtocol Conformance
+extension TileServerConfig {
+    public var retryPolicy: RetryPolicyProtocol {
+        return _retryPolicy
+    }
+    
+    public var httpConfiguration: HTTPConfigurationProtocol {
+        return DefaultHTTPConfiguration()
+    }
+    
+    public func isZoomLevelSupported(_ zoom: Int) -> Bool {
+        return zoom >= minZoom && zoom <= maxZoom
+    }
+}
+
+public struct RetryPolicy: RetryPolicyProtocol, Sendable {
     public let maxAttempts: Int
     public let baseDelay: TimeInterval
     public let maxDelay: TimeInterval
@@ -183,10 +215,10 @@ public extension TileServerConfig {
         )
     }
     
-    static func googleMaps(mapType: GoogleMapType, apiKey: String) -> TileServerConfig {
+    static func googleMaps(mapType: String, apiKey: String) -> TileServerConfig {
         return TileServerConfig(
-            name: "Google Maps \(mapType.rawValue.capitalized)",
-            baseURL: "https://mt1.google.com/vt/lyrs=\(mapType.lyrsCode)&x={x}&y={y}&z={z}",
+            name: "Google Maps \(mapType.capitalized)",
+            baseURL: "https://mt1.google.com/vt/lyrs=\(mapType)&x={x}&y={y}&z={z}",
             format: .png,
             maxZoom: 20,
             attribution: "© Google",
@@ -194,10 +226,10 @@ public extension TileServerConfig {
         )
     }
     
-    static func bingMaps(mapType: BingMapType, apiKey: String) -> TileServerConfig {
+    static func bingMaps(mapType: String, apiKey: String) -> TileServerConfig {
         return TileServerConfig(
-            name: "Bing Maps \(mapType.rawValue.capitalized)",
-            baseURL: "https://ecn.t3.tiles.virtualearth.net/tiles/\(mapType.tileType){quadkey}.jpeg?g=1",
+            name: "Bing Maps \(mapType.capitalized)",
+            baseURL: "https://ecn.t3.tiles.virtualearth.net/tiles/\(mapType){quadkey}.jpeg?g=1",
             format: .jpeg,
             maxZoom: 19,
             attribution: "© Microsoft Corporation",
@@ -216,35 +248,9 @@ public extension TileServerConfig {
     }
 }
 
-public enum GoogleMapType: String, CaseIterable {
-    case roadmap = "roadmap"
-    case satellite = "satellite"
-    case terrain = "terrain"
-    case hybrid = "hybrid"
-    
-    var lyrsCode: String {
-        switch self {
-        case .roadmap: return "m"
-        case .satellite: return "s"
-        case .terrain: return "t"
-        case .hybrid: return "y"
-        }
-    }
-}
+// GoogleMapType moved to TileServerConfigFactory.swift
 
-public enum BingMapType: String, CaseIterable {
-    case road = "road"
-    case aerial = "aerial"
-    case aerialWithLabels = "aerialWithLabels"
-    
-    var tileType: String {
-        switch self {
-        case .road: return "r"
-        case .aerial: return "a"
-        case .aerialWithLabels: return "h"
-        }
-    }
-}
+// BingMapType moved to TileServerConfigFactory.swift
 
 public enum ArcGISService {
     case worldImagery

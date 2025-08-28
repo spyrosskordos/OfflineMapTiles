@@ -474,6 +474,108 @@ public final class UnifiedExamples {
             print("Cache management error: \(error.localizedDescription)")
         }
     }
+    
+    /// Example 15: Data deletion with detailed information
+    public static func dataDelectionWithInfo() async {
+        do {
+            let sdk = UnifiedOfflineMapTilesSDK()
+            
+            // First, check what data exists
+            let dataInfo = await sdk.getStoredDataInfo()
+            print("Before deletion: \(dataInfo.summary)")
+            
+            if dataInfo.hasStoredData {
+                // Delete all data with detailed information
+                let deletionInfo = try await sdk.deleteAllDataWithInfo()
+                print("Deletion completed: \(deletionInfo.formattedSummary)")
+                
+                if deletionInfo.hadDataToDelete {
+                    print("Successfully freed up space!")
+                } else {
+                    print("No data was found to delete")
+                }
+            } else {
+                print("No stored data to delete")
+            }
+            
+            // Verify deletion
+            let afterInfo = await sdk.getStoredDataInfo()
+            print("After deletion: \(afterInfo.summary)")
+            
+        } catch {
+            print("Data deletion error: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Example 16: Selective data deletion for specific configurations
+    public static func selectiveDataDeletion() async {
+        do {
+            let sdk = UnifiedOfflineMapTilesSDK()
+            
+            // Get current data info
+            let initialInfo = await sdk.getStoredDataInfo()
+            print("Current stored data: \(initialInfo.summary)")
+            
+            // Delete data for specific configurations
+            let configsToDelete = ["OpenStreetMap", "CartoDB-Positron"]
+            try await sdk.deleteData(for: configsToDelete)
+            print("Deleted data for configurations: \(configsToDelete.joined(separator: ", "))")
+            
+            // Check remaining data
+            let remainingInfo = await sdk.getStoredDataInfo()
+            print("Remaining data: \(remainingInfo.summary)")
+            
+            // Alternative: Delete data for just one configuration
+            try await sdk.deleteData(for: "CartoDB-DarkMatter")
+            print("Deleted data for CartoDB-DarkMatter configuration")
+            
+        } catch {
+            print("Selective deletion error: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Example 17: Complete data management workflow
+    public static func completeDataManagementWorkflow() async {
+        do {
+            let sdk = UnifiedOfflineMapTilesSDK()
+            
+            print("=== Data Management Workflow ===")
+            
+            // Step 1: Check current data
+            let currentInfo = await sdk.getStoredDataInfo()
+            print("1. Current data status: \(currentInfo.summary)")
+            
+            // Step 2: If we have data, show size information
+            if currentInfo.hasStoredData {
+                let totalSize = await sdk.getCacheSize()
+                let formattedSize = ByteCountFormatter().string(fromByteCount: totalSize)
+                print("2. Total cache size: \(formattedSize)")
+                
+                // Step 3: Delete with tracking
+                print("3. Deleting all data...")
+                let deletionInfo = try await sdk.deleteAllDataWithInfo()
+                print("   \(deletionInfo.formattedSummary)")
+                
+                // Step 4: Verify deletion was successful
+                let finalInfo = await sdk.getStoredDataInfo()
+                print("4. Final status: \(finalInfo.summary)")
+                
+                if !finalInfo.hasStoredData {
+                    print("✅ All data successfully deleted!")
+                } else {
+                    print("⚠️  Some data may still remain")
+                }
+                
+            } else {
+                print("2. No data to delete")
+            }
+            
+            print("=== Workflow Complete ===")
+            
+        } catch {
+            print("Data management workflow error: \(error.localizedDescription)")
+        }
+    }
 }
 
 // MARK: - Custom Progress Observer for Examples

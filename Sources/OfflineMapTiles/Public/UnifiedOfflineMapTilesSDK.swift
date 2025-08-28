@@ -356,6 +356,131 @@ public final class UnifiedOfflineMapTilesSDK: @unchecked Sendable {
         try await dependencyContainer.storage.clearAll()
     }
     
+    // MARK: - Data Deletion
+    
+    /// Delete all saved map data (alias for clearAllCache for better naming)
+    /// This removes all downloaded tiles from all configurations
+    public func deleteAllData() async throws {
+        logger.info("Deleting all saved map data")
+        try await dependencyContainer.storage.clearAll()
+    }
+    
+    /// Delete saved data for a specific configuration
+    /// - Parameter configName: Name of the configuration to delete data for
+    public func deleteData(for configName: String) async throws {
+        logger.info("Deleting saved data for configuration: \(configName)")
+        try await dependencyContainer.storage.clearCache(for: configName)
+    }
+    
+    /// Delete saved data for multiple configurations
+    /// - Parameter configNames: Array of configuration names to delete data for
+    public func deleteData(for configNames: [String]) async throws {
+        logger.info("Deleting saved data for \(configNames.count) configurations")
+        
+        for configName in configNames {
+            try await dependencyContainer.storage.clearCache(for: configName)
+        }
+    }
+    
+    /// Delete data with size and confirmation information
+    /// - Returns: Information about what was deleted
+    public func deleteAllDataWithInfo() async throws -> DataDeletionInfo {
+        let sizeBefore = await getCacheSize()
+        let startTime = Date()
+        
+        logger.info("Deleting all saved data (size before: \(ByteCountFormatter().string(fromByteCount: sizeBefore)))")
+        
+        try await dependencyContainer.storage.clearAll()
+        
+        let deletionTime = Date().timeIntervalSince(startTime)
+        let sizeAfter = await getCacheSize()
+        
+        let info = DataDeletionInfo(
+            deletedBytes: sizeBefore - sizeAfter,
+            deletionTimeSeconds: deletionTime,
+            configurationsAffected: ["all"],
+            wasSuccessful: true
+        )
+        
+        logger.info("Data deletion completed: \(info.formattedSummary)")
+        return info
+    }
+    
+    /// Information about a data deletion operation
+    public struct DataDeletionInfo {
+        /// Number of bytes that were deleted
+        public let deletedBytes: Int64
+        
+        /// Time it took to complete the deletion in seconds
+        public let deletionTimeSeconds: TimeInterval
+        
+        /// Names of configurations that were affected
+        public let configurationsAffected: [String]
+        
+        /// Whether the deletion was successful
+        public let wasSuccessful: Bool
+        
+        /// Formatted summary of the deletion
+        public var formattedSummary: String {
+            let sizeString = ByteCountFormatter().string(fromByteCount: deletedBytes)
+            let timeString = String(format: "%.2f", deletionTimeSeconds)
+            let configString = configurationsAffected.contains("all") ? "all configurations" : "\(configurationsAffected.count) configuration(s)"
+            
+            return "Deleted \(sizeString) from \(configString) in \(timeString)s"
+        }
+        
+        /// Whether any data was actually deleted
+        public var hadDataToDelete: Bool {
+            return deletedBytes > 0
+        }
+    }
+    
+    /// Get information about stored data without deleting it
+    /// - Returns: Information about currently stored data
+    public func getStoredDataInfo() async -> StoredDataInfo {
+        let totalSize = await getCacheSize()
+        
+        // Try to get more detailed info if available
+        // Note: This is a simplified implementation - a more sophisticated version
+        // would query the storage for detailed per-config statistics
+        
+        return StoredDataInfo(
+            totalSizeBytes: totalSize,
+            estimatedTileCount: totalSize > 0 ? Int(totalSize / 15000) : 0, // Rough estimate
+            hasStoredData: totalSize > 0,
+            lastUpdated: Date() // Would be actual last update time in a full implementation
+        )
+    }
+    
+    /// Information about currently stored data
+    public struct StoredDataInfo {
+        /// Total size of stored data in bytes
+        public let totalSizeBytes: Int64
+        
+        /// Estimated number of tiles stored
+        public let estimatedTileCount: Int
+        
+        /// Whether there is any stored data
+        public let hasStoredData: Bool
+        
+        /// When the data was last updated
+        public let lastUpdated: Date
+        
+        /// Formatted total size
+        public var formattedSize: String {
+            return ByteCountFormatter().string(fromByteCount: totalSizeBytes)
+        }
+        
+        /// Summary description
+        public var summary: String {
+            if !hasStoredData {
+                return "No stored map data"
+            }
+            
+            return "Stored data: \(formattedSize) (~\(estimatedTileCount) tiles)"
+        }
+    }
+    
     // MARK: - System Information
     
     /// Get comprehensive system information

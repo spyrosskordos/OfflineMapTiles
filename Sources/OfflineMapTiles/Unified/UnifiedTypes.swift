@@ -282,21 +282,37 @@ internal final class UnifiedProgressCoordinator: @unchecked Sendable {
     }
     
     func notifyProgress(configName: String, progress: DownloadProgress) async {
-        queue.async { [weak self] in
-            guard let self = self else { return }
-            
-            self.configProgress[configName] = progress
-            let unifiedProgress = self.calculateUnifiedProgress()
-            
-            let validObservers = self.observers.compactMap { $0.observer }
-            for observer in validObservers {
-                DispatchQueue.main.async {
-                    if self.strategy == .individual || self.strategy == .detailed {
-                        observer.didUpdateConfigProgress(configName: configName, progress: progress)
-                    }
-                    
-                    if self.strategy == .unified || self.strategy == .detailed {
-                        observer.didUpdateUnifiedProgress(unifiedProgress)
+        await withCheckedContinuation { continuation in
+            queue.async(flags: .barrier) { [weak self] in
+                guard let self = self else {
+                    continuation.resume()
+                    return
+                }
+                
+                self.configProgress[configName] = progress
+                let unifiedProgress = self.calculateUnifiedProgress()
+                let strategy = self.strategy
+                
+                // Capture valid observers with strong references
+                let validObservers = self.observers.compactMap { $0.observer }
+                
+                // Clean up dead observers
+                self.cleanupObservers()
+                
+                continuation.resume()
+                
+                // Dispatch to main queue with captured values
+                if !validObservers.isEmpty {
+                    DispatchQueue.main.async {
+                        for observer in validObservers {
+                            if strategy == .individual || strategy == .detailed {
+                                observer.didUpdateConfigProgress(configName: configName, progress: progress)
+                            }
+                            
+                            if strategy == .unified || strategy == .detailed {
+                                observer.didUpdateUnifiedProgress(unifiedProgress)
+                            }
+                        }
                     }
                 }
             }
@@ -304,46 +320,102 @@ internal final class UnifiedProgressCoordinator: @unchecked Sendable {
     }
     
     func notifyConfigCompletion(configName: String, result: DownloadResult) async {
-        queue.async { [weak self] in
-            guard let self = self else { return }
-            
-            self.configResults[configName] = result
+        await withCheckedContinuation { continuation in
+            queue.async(flags: .barrier) { [weak self] in
+                guard let self = self else {
+                    continuation.resume()
+                    return
+                }
+                
+                self.configResults[configName] = result
+                continuation.resume()
+            }
         }
     }
     
     func notifyCompletion(with result: UnifiedDownloadResult) async {
-        let validObservers = queue.sync { self.observers.compactMap { $0.observer } }
+        let validObservers: [UnifiedProgressObserver] = await withCheckedContinuation { continuation in
+            queue.async { [weak self] in
+                guard let self = self else {
+                    continuation.resume(returning: [])
+                    return
+                }
+                
+                let observers = self.observers.compactMap { $0.observer }
+                self.cleanupObservers()
+                continuation.resume(returning: observers)
+            }
+        }
         
-        for observer in validObservers {
-            DispatchQueue.main.async {
-                observer.didCompleteDownload(with: result)
+        if !validObservers.isEmpty {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                DispatchQueue.main.async {
+                    for observer in validObservers {
+                        observer.didCompleteDownload(with: result)
+                    }
+                    continuation.resume()
+                }
             }
         }
     }
     
     func notifyFailure(with error: Error) async {
-        let validObservers = queue.sync { self.observers.compactMap { $0.observer } }
+        let validObservers: [UnifiedProgressObserver] = await withCheckedContinuation { continuation in
+            queue.async { [weak self] in
+                guard let self = self else {
+                    continuation.resume(returning: [])
+                    return
+                }
+                
+                let observers = self.observers.compactMap { $0.observer }
+                self.cleanupObservers()
+                continuation.resume(returning: observers)
+            }
+        }
         
-        for observer in validObservers {
-            DispatchQueue.main.async {
-                observer.didFailDownload(with: error)
+        if !validObservers.isEmpty {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                DispatchQueue.main.async {
+                    for observer in validObservers {
+                        observer.didFailDownload(with: error)
+                    }
+                    continuation.resume()
+                }
             }
         }
     }
     
     private func calculateUnifiedProgress() -> UnifiedProgress {
+        guard !configProgress.isEmpty else {
+            return UnifiedProgress(
+                overallPercentage: 0.0,
+                totalTiles: 0,
+                totalDownloaded: 0,
+                totalFailed: 0,
+                configProgress: [:],
+                configurationCount: configNames.count,
+                completedConfigurations: configResults.count,
+                currentTile: nil,
+                estimatedTimeRemaining: nil,
+                currentSpeed: nil
+            )
+        }
+        
         let totalTiles = configProgress.values.reduce(0) { $0 + $1.totalTiles }
         let totalDownloaded = configProgress.values.reduce(0) { $0 + $1.downloadedTiles }
         let totalFailed = configProgress.values.reduce(0) { $0 + $1.failedTiles }
         
-        let overallPercentage = totalTiles > 0 ? Double(totalDownloaded + totalFailed) / Double(totalTiles) * 100.0 : 0.0
+        let overallPercentage = totalTiles > 0 ? min(100.0, Double(totalDownloaded + totalFailed) / Double(totalTiles) * 100.0) : 0.0
         
         let currentTime = Date()
         let elapsed = currentTime.timeIntervalSince(startTime)
-        let speed = elapsed > 0 ? Double(totalDownloaded) / elapsed : 0.0
+        let speed = elapsed > 0 && totalDownloaded > 0 ? Double(totalDownloaded) / elapsed : 0.0
         
-        let remaining = totalTiles - (totalDownloaded + totalFailed)
+        let remaining = max(0, totalTiles - (totalDownloaded + totalFailed))
         let eta = speed > 0 && remaining > 0 ? TimeInterval(remaining) / speed : nil
+        
+        // Safely get current tile
+        let currentTile = configProgress.values.compactMap { $0.currentTile }.last
         
         return UnifiedProgress(
             overallPercentage: overallPercentage,
@@ -353,7 +425,7 @@ internal final class UnifiedProgressCoordinator: @unchecked Sendable {
             configProgress: configProgress,
             configurationCount: configNames.count,
             completedConfigurations: configResults.count,
-            currentTile: configProgress.values.compactMap { $0.currentTile }.last,
+            currentTile: currentTile,
             estimatedTimeRemaining: eta,
             currentSpeed: speed
         )

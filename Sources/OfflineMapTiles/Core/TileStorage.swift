@@ -108,23 +108,22 @@ public final class TileStorage: @unchecked Sendable {
     public func getCacheSize() async -> Int64 {
         do {
             let resourceKeys: [URLResourceKey] = [.fileSizeKey, .isDirectoryKey]
-            let enumerator = fileManager.enumerator(
-                at: baseDirectory,
-                includingPropertiesForKeys: resourceKeys,
-                options: [.skipsHiddenFiles],
-                errorHandler: { _, _ in return true }
-            )
+            // Use direct directory listing instead of enumerator for async compatibility
             
             var totalSize: Int64 = 0
             
-            if let enumerator = enumerator {
-                for case let fileURL as URL in enumerator {
-                    let resourceValues = try fileURL.resourceValues(forKeys: Set(resourceKeys))
-                    
-                    if let isDirectory = resourceValues.isDirectory, !isDirectory,
-                       let fileSize = resourceValues.fileSize {
-                        totalSize += Int64(fileSize)
-                    }
+            let contents = try fileManager.contentsOfDirectory(
+                at: baseDirectory,
+                includingPropertiesForKeys: resourceKeys,
+                options: [.skipsHiddenFiles]
+            )
+            
+            for fileURL in contents {
+                let resourceValues = try fileURL.resourceValues(forKeys: Set(resourceKeys))
+                
+                if let isDirectory = resourceValues.isDirectory, !isDirectory,
+                   let fileSize = resourceValues.fileSize {
+                    totalSize += Int64(fileSize)
                 }
             }
             
@@ -140,22 +139,21 @@ public final class TileStorage: @unchecked Sendable {
     public func getTileCount() async -> Int {
         do {
             let resourceKeys: [URLResourceKey] = [.isDirectoryKey]
-            let enumerator = fileManager.enumerator(
-                at: baseDirectory,
-                includingPropertiesForKeys: resourceKeys,
-                options: [.skipsHiddenFiles],
-                errorHandler: { _, _ in return true }
-            )
+            // Use direct directory listing instead of enumerator for async compatibility
             
             var count = 0
             
-            if let enumerator = enumerator {
-                for case let fileURL as URL in enumerator {
-                    let resourceValues = try fileURL.resourceValues(forKeys: Set(resourceKeys))
-                    
-                    if let isDirectory = resourceValues.isDirectory, !isDirectory {
-                        count += 1
-                    }
+            let contents = try fileManager.contentsOfDirectory(
+                at: baseDirectory,
+                includingPropertiesForKeys: resourceKeys,
+                options: [.skipsHiddenFiles]
+            )
+            
+            for fileURL in contents {
+                let resourceValues = try fileURL.resourceValues(forKeys: Set(resourceKeys))
+                
+                if let isDirectory = resourceValues.isDirectory, !isDirectory {
+                    count += 1
                 }
             }
             

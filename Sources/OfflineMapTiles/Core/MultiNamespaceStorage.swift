@@ -22,7 +22,7 @@ public final class MultiNamespaceStorage: @unchecked Sendable {
         
         // Validate namespace names (must be valid directory names)
         for namespace in namespaces {
-            guard isValidNamespace(namespace) else {
+            guard Self.isValidNamespace(namespace) else {
                 throw MultiNamespaceStorageError.invalidNamespace(namespace)
             }
         }
@@ -268,7 +268,7 @@ public final class MultiNamespaceStorage: @unchecked Sendable {
         }
     }
     
-    private func isValidNamespace(_ namespace: String) -> Bool {
+    private static func isValidNamespace(_ namespace: String) -> Bool {
         // Check for valid directory name
         let invalidChars = CharacterSet(charactersIn: "/\\:*?\"<>|")
         return !namespace.isEmpty &&

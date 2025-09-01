@@ -31,7 +31,7 @@ public final class TileService: @unchecked Sendable {
         
         // Create downloader
         self.downloader = TileDownloader(
-            httpConfig: DefaultHTTPConfiguration(),
+            httpConfig: BasicHTTPConfiguration(),
             logger: logger
         )
         
@@ -149,7 +149,7 @@ public final class TileService: @unchecked Sendable {
         in bounds: MapBounds,
         at zoomLevel: Int,
         from serverNames: [String]? = nil,
-        progressHandler: ((String, DownloadProgress) -> Void)? = nil
+        progressHandler: (@Sendable (String, DownloadProgress) -> Void)? = nil
     ) async -> [String: Int] {
         let serversToUse = serverNames ?? Array(serverConfigs.keys)
         let coordinates = calculator.calculateTilesForZoom(bounds: bounds, zoom: zoomLevel)
@@ -171,7 +171,7 @@ public final class TileService: @unchecked Sendable {
     public func downloadTiles(
         coordinates: [TileCoordinate],
         from serverNames: [String]? = nil,
-        progressHandler: ((String, DownloadProgress) -> Void)? = nil
+        progressHandler: (@Sendable (String, DownloadProgress) -> Void)? = nil
     ) async -> [String: Int] {
         let serversToUse = serverNames ?? Array(serverConfigs.keys)
         var results: [String: Int] = [:]
@@ -183,15 +183,18 @@ public final class TileService: @unchecked Sendable {
             for serverName in serversToUse {
                 guard let serverConfig = serverConfigs[serverName] else { continue }
                 
-                group.addTask { [weak self] in
+                // Capture the progress handler safely
+                let capturedProgressHandler = progressHandler
+                
+                group.addTask { [weak self, serverName, capturedProgressHandler] in
                     guard let self = self else { return (serverName, 0) }
                     
                     return await (serverName, self.downloadTilesForServer(
                         coordinates: coordinates,
                         serverName: serverName,
                         serverConfig: serverConfig,
-                        progressHandler: { progress in
-                            progressHandler?(serverName, progress)
+                        progressHandler: { @Sendable progress in
+                            capturedProgressHandler?(serverName, progress)
                         }
                     ))
                 }
@@ -352,7 +355,7 @@ public final class TileService: @unchecked Sendable {
         coordinates: [TileCoordinate],
         serverName: String,
         serverConfig: TileServerConfig,
-        progressHandler: ((DownloadProgress) -> Void)?
+        progressHandler: (@Sendable (DownloadProgress) -> Void)?
     ) async -> Int {
         let total = coordinates.count
         var completed = 0

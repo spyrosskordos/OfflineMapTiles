@@ -40,7 +40,7 @@ public final class TileDownloader: @unchecked Sendable {
             
             // Validate HTTP response
             guard let httpResponse = response as? HTTPURLResponse else {
-                return .failure(.invalidResponse("Non-HTTP response"))
+                return .failure(.invalidURL(url.absoluteString))
             }
             
             // Check status code
@@ -105,8 +105,8 @@ public protocol HTTPConfiguration {
     var maxConcurrentOperations: Int { get }
 }
 
-/// Default HTTP configuration
-public struct DefaultHTTPConfiguration: HTTPConfiguration, Sendable {
+/// Basic HTTP configuration adapter
+public struct BasicHTTPConfiguration: HTTPConfiguration, Sendable {
     public let timeout: TimeInterval = 30.0
     public let maxConcurrentOperations: Int = 8
     

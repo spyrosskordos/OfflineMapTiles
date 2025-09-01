@@ -163,8 +163,25 @@ if let data = await mapTiles?.getTileData(for: tile) {
     // Use tile data
 }
 
-// Clear cache
+// Clear cache (existing method)
 try await mapTiles?.clearCache()
+
+// New enhanced delete methods
+let sdk = UnifiedOfflineMapTilesSDK()
+
+// Delete all data with information
+let deletionInfo = try await sdk.deleteAllDataWithInfo()
+print("Deleted: \(deletionInfo.formattedSummary)")
+
+// Delete data for specific configurations
+try await sdk.deleteData(for: "OpenStreetMap")
+try await sdk.deleteData(for: ["CartoDB-Positron", "CartoDB-DarkMatter"])
+
+// Check stored data before deletion
+let dataInfo = await sdk.getStoredDataInfo()
+if dataInfo.hasStoredData {
+    try await sdk.deleteAllData()
+}
 ```
 
 ### Error Handling
@@ -220,6 +237,12 @@ Main class for downloading and managing offline map tiles.
 - `getTileData(for:)`: Retrieve cached tile data
 - `clearCache()`: Remove all cached tiles
 - `getCacheSize()`: Get current cache size in bytes
+
+#### Enhanced Delete Methods (UnifiedOfflineMapTilesSDK)
+- `deleteAllData()`: Delete all saved map data
+- `deleteData(for:)`: Delete data for specific configuration(s)
+- `deleteAllDataWithInfo()`: Delete all data with detailed tracking information
+- `getStoredDataInfo()`: Get information about currently stored data
 
 #### `MapBounds`
 Defines geographical boundaries for tile downloads.

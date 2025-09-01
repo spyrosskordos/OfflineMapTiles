@@ -276,26 +276,58 @@ public final class UnifiedTileManager: @unchecked Sendable {
     // MARK: - Tile Retrieval
     
     /// Get tile data from the primary configuration
+    /// WARNING: When using multiple configurations, specify the config explicitly to avoid ambiguity
     public func getTileData(for coordinate: TileCoordinate) async -> Data? {
+        // Log warning if multiple configs exist but user doesn't specify which one
+        if configuration.configs.count > 1 {
+            logger.debug("getTileData called without specifying config - using primary config '\(primaryConfiguration.name)'. Consider using getTileData(for:from:) to be explicit.")
+        }
+        
         let configName = getStorageConfigName(primaryConfiguration.name)
         return await storage.getTile(coordinate: coordinate, configName: configName)
     }
     
     /// Get tile data from a specific configuration
     public func getTileData(for coordinate: TileCoordinate, from configName: String) async -> Data? {
+        // Validate that the requested configuration exists
+        guard configuration.configs.contains(where: { $0.name == configName }) else {
+            logger.warning("Requested config '\(configName)' not found. Available configs: \(configurationNames.joined(separator: ", "))")
+            return nil
+        }
+        
         let storageConfigName = getStorageConfigName(configName)
         return await storage.getTile(coordinate: coordinate, configName: storageConfigName)
     }
     
     /// Get tile data with fallback strategy (tries configs in priority order)
     public func getTileDataWithFallback(for coordinate: TileCoordinate) async -> (data: Data?, source: String?) {
-        for config in configuration.configs {
+        // Try configs in priority order based on storage strategy
+        let searchOrder = getConfigSearchOrder()
+        
+        for config in searchOrder {
             let storageConfigName = getStorageConfigName(config.name)
             if let data = await storage.getTile(coordinate: coordinate, configName: storageConfigName) {
                 return (data, config.name)
             }
         }
         return (nil, nil)
+    }
+    
+    /// Get the order in which configs should be searched based on storage strategy
+    private func getConfigSearchOrder() -> [TileServerConfigProtocol] {
+        switch configuration.storageStrategy {
+        case .separate:
+            // For separate storage, search in original order
+            return configuration.configs
+        case .merged:
+            // For merged storage, prioritize primary config first for consistency
+            var ordered = [primaryConfiguration]
+            ordered.append(contentsOf: configuration.configs.filter { $0.name != primaryConfiguration.name })
+            return ordered
+        case .single:
+            // For single config, use natural order
+            return configuration.configs
+        }
     }
     
     /// Check if tile exists in primary configuration
@@ -316,6 +348,21 @@ public final class UnifiedTileManager: @unchecked Sendable {
         }
         
         return available
+    }
+    
+    /// Get tile data with source information to help debug conflicts
+    public func getTileDataWithSource(for coordinate: TileCoordinate, from configName: String? = nil) async -> (data: Data?, source: String?, allAvailable: [String]) {
+        let allAvailable = await getAvailableConfigurations(for: coordinate)
+        
+        if let configName = configName {
+            // Get from specific configuration
+            let data = await getTileData(for: coordinate, from: configName)
+            return (data, configName, allAvailable)
+        } else {
+            // Get from primary configuration
+            let data = await getTileData(for: coordinate)
+            return (data, primaryConfiguration.name, allAvailable)
+        }
     }
     
     // MARK: - Cache Management
@@ -422,6 +469,79 @@ public final class UnifiedTileManager: @unchecked Sendable {
     public func withUpdatedConfiguration(_ newConfig: Configuration) throws -> UnifiedTileManager {
         // This would require access to dependencies - would need to be implemented at SDK level
         fatalError("Configuration updates should be handled at SDK level")
+    }
+    
+    /// Get diagnostic information about storage configuration to help debug conflicts
+    public func getStorageDiagnostics() -> StorageDiagnostics {
+        var configMappings: [String: String] = [:]
+        
+        for config in configuration.configs {
+            let storageConfigName = getStorageConfigName(config.name)
+            configMappings[config.name] = storageConfigName ?? "default_namespace"
+        }
+        
+        return StorageDiagnostics(
+            storageStrategy: configuration.storageStrategy,
+            configCount: configuration.configs.count,
+            primaryConfig: primaryConfiguration.name,
+            configStorageMappings: configMappings,
+            potentialConflicts: identifyPotentialConflicts(configMappings)
+        )
+    }
+    
+    private func identifyPotentialConflicts(_ mappings: [String: String]) -> [String] {
+        var conflicts: [String] = []
+        let storageNamespaces = Array(mappings.values)
+        let uniqueNamespaces = Set(storageNamespaces)
+        
+        if storageNamespaces.count > uniqueNamespaces.count {
+            // Find which configs share storage namespaces
+            for namespace in uniqueNamespaces {
+                let configsInNamespace = mappings.filter { $0.value == namespace }.keys
+                if configsInNamespace.count > 1 {
+                    conflicts.append("Configs sharing '\(namespace)' namespace: \(Array(configsInNamespace).joined(separator: ", "))")
+                }
+            }
+        }
+        
+        return conflicts
+    }
+    
+    /// Diagnostic information about storage configuration
+    public struct StorageDiagnostics {
+        public let storageStrategy: StorageStrategy
+        public let configCount: Int
+        public let primaryConfig: String
+        public let configStorageMappings: [String: String]
+        public let potentialConflicts: [String]
+        
+        public var hasPotentialConflicts: Bool {
+            return !potentialConflicts.isEmpty
+        }
+        
+        public var summary: String {
+            var summary = """
+                Storage Strategy: \(storageStrategy)
+                Primary Config: \(primaryConfig)
+                Total Configs: \(configCount)
+                Storage Mappings:
+                """
+            
+            for (config, storage) in configStorageMappings {
+                summary += "\n  \(config) → \(storage)"
+            }
+            
+            if hasPotentialConflicts {
+                summary += "\n⚠️ Potential Conflicts:"
+                for conflict in potentialConflicts {
+                    summary += "\n  - \(conflict)"
+                }
+            } else {
+                summary += "\n✅ No conflicts detected"
+            }
+            
+            return summary
+        }
     }
     
     // MARK: - Private Methods
@@ -674,9 +794,16 @@ public final class UnifiedTileManager: @unchecked Sendable {
     private func getStorageConfigName(_ configName: String) -> String? {
         switch configuration.storageStrategy {
         case .separate:
+            // Each config gets its own storage namespace - no conflicts possible
             return configName
-        case .merged, .single:
-            return nil // Use default storage namespace
+        case .merged:
+            // CRITICAL FIX: For merged strategy, we still need to separate by config to avoid conflicts
+            // The "merged" behavior should be handled at the retrieval level, not storage level
+            // This prevents tiles from different URLs overwriting each other
+            return configName
+        case .single:
+            // Single config mode - use config name if multiple configs exist to prevent conflicts
+            return configuration.configs.count == 1 ? nil : configName
         }
     }
 }

@@ -3,7 +3,8 @@
     "allow": [
       "Bash(swift build)",
       "Bash(swift test:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Read(/Users/spyridonskordos/**)"
     ],
     "deny": [],
     "ask": []

@@ -111,6 +111,23 @@ public struct TileServerConfig: TileServerConfigProtocol, Sendable {
                tileToCoordinate.longitude >= bounds.southWest.longitude &&
                tileToCoordinate.longitude <= bounds.northEast.longitude
     }
+    
+    public func isCoordinateValid(_ coordinate: TileCoordinate) -> Bool {
+        // Check if zoom level is supported
+        guard isZoomLevelSupported(coordinate.zoom) else {
+            return false
+        }
+        
+        // Check basic coordinate validity for the zoom level
+        let maxTileIndex = 1 << coordinate.zoom // 2^zoom
+        guard coordinate.x >= 0 && coordinate.x < maxTileIndex &&
+              coordinate.y >= 0 && coordinate.y < maxTileIndex else {
+            return false
+        }
+        
+        // Check if coordinate is within bounds (if bounds are set)
+        return isCoordinateInBounds(coordinate)
+    }
 }
 
 // MARK: - TileServerConfigProtocol Conformance

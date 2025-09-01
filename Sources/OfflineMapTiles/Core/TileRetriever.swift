@@ -19,8 +19,23 @@ public final class TileRetriever: @unchecked Sendable {
     ///   - configName: Name of the configuration (optional for single config)
     /// - Returns: Tile data if found
     public func getTile(coordinate: TileCoordinate, configName: String? = nil) async -> Data? {
-        // For single config, use the config name
-        let targetConfigName = configName ?? configs.first?.name
+        let targetConfigName: String?
+        
+        if let configName = configName {
+            // Validate that the requested configuration exists
+            guard configs.contains(where: { $0.name == configName }) else {
+                print("Warning: Requested config '\(configName)' not found in TileRetriever. Available configs: \(configs.map { $0.name }.joined(separator: ", "))")
+                return nil
+            }
+            targetConfigName = configName
+        } else {
+            // For single config, use the config name; for multiple, warn and use first
+            if configs.count > 1 {
+                print("Warning: Multiple configs available but none specified. Using '\(configs.first?.name ?? "unknown")'. Available: \(configs.map { $0.name }.joined(separator: ", "))")
+            }
+            targetConfigName = configs.first?.name
+        }
+        
         return await storage.getTile(coordinate: coordinate, configName: targetConfigName)
     }
     

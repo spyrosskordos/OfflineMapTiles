@@ -576,6 +576,131 @@ public final class UnifiedExamples {
             print("Data management workflow error: \(error.localizedDescription)")
         }
     }
+    
+    /// Example 18: Debugging tile source conflicts
+    public static func debugTileSourceConflicts() async {
+        do {
+            let sdk = UnifiedOfflineMapTilesSDK()
+            
+            // Create multiple configurations that might conflict
+            let configs = [
+                TileServerConfigFactory.openStreetMap(),
+                TileServerConfigFactory.cartoDB(style: .positron),
+                TileServerConfigFactory.cartoDB(style: .darkMatter)
+            ]
+            
+            print("=== Tile Source Conflict Debugging ===")
+            
+            // Test different storage strategies
+            let strategies: [(UnifiedTileManager.StorageStrategy, String)] = [
+                (.separate, "Separate Storage"),
+                (.merged, "Merged Storage"), 
+                (.single, "Single Storage")
+            ]
+            
+            for (strategy, name) in strategies {
+                print("\n--- Testing \(name) Strategy ---")
+                
+                let manager = try await sdk.createManager(
+                    with: configs,
+                    storageStrategy: strategy
+                )
+                
+                // Get diagnostics
+                let diagnostics = manager.getStorageDiagnostics()
+                print("Diagnostics:\n\(diagnostics.summary)")
+                
+                // Test tile retrieval
+                let testCoordinate = TileCoordinate(x: 1234, y: 5678, zoom: 12)
+                
+                // Check what's available for this coordinate
+                let available = await manager.getAvailableConfigurations(for: testCoordinate)
+                print("Available configs for test coordinate: \(available.isEmpty ? "none" : available.joined(separator: ", "))")
+                
+                // Test retrieval with source info
+                let (data, source, allAvailable) = await manager.getTileDataWithSource(for: testCoordinate)
+                if let data = data, let source = source {
+                    print("Retrieved tile from '\(source)' (size: \(data.count) bytes)")
+                    print("All available sources: \(allAvailable.joined(separator: ", "))")
+                } else {
+                    print("No tile data found for test coordinate")
+                }
+                
+                if diagnostics.hasPotentialConflicts {
+                    print("⚠️ This strategy has potential conflicts!")
+                } else {
+                    print("✅ This strategy is conflict-free")
+                }
+            }
+            
+            print("\n=== Recommendations ===")
+            print("- Use .separate strategy to completely avoid conflicts")
+            print("- Use .merged strategy only if you want fallback behavior")
+            print("- Always specify config name in getTileData(for:from:)")
+            print("- Use getTileDataWithSource() to debug tile sources")
+            
+        } catch {
+            print("Tile conflict debugging error: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Example 19: Proper tile retrieval patterns
+    public static func properTileRetrievalPatterns() async {
+        do {
+            let sdk = UnifiedOfflineMapTilesSDK()
+            
+            let configs = [
+                TileServerConfigFactory.openStreetMap(),
+                TileServerConfigFactory.cartoDB(style: .positron)
+            ]
+            
+            let manager = try await sdk.createManager(
+                with: configs,
+                storageStrategy: .separate // Use separate to avoid conflicts
+            )
+            
+            let testCoordinate = TileCoordinate(x: 1234, y: 5678, zoom: 12)
+            
+            print("=== Proper Tile Retrieval Patterns ===")
+            
+            // Pattern 1: Explicit configuration (RECOMMENDED)
+            print("\n1. Explicit configuration retrieval:")
+            if let osmTile = await manager.getTileData(for: testCoordinate, from: "OpenStreetMap") {
+                print("   Got OSM tile: \(osmTile.count) bytes")
+            }
+            
+            if let cartoTile = await manager.getTileData(for: testCoordinate, from: "CartoDB Positron") {
+                print("   Got CartoDB tile: \(cartoTile.count) bytes")
+            }
+            
+            // Pattern 2: Fallback with source tracking
+            print("\n2. Fallback retrieval with source info:")
+            let (fallbackData, source) = await manager.getTileDataWithFallback(for: testCoordinate)
+            if let data = fallbackData, let source = source {
+                print("   Fallback found tile from '\(source)': \(data.count) bytes")
+            } else {
+                print("   No tile found in any configuration")
+            }
+            
+            // Pattern 3: Diagnostic retrieval
+            print("\n3. Diagnostic retrieval:")
+            let (_, diagnosticSource, diagnosticAllAvailable) = await manager.getTileDataWithSource(for: testCoordinate)
+            print("   Retrieved from: \(diagnosticSource ?? "none")")
+            print("   Available in: \(diagnosticAllAvailable.isEmpty ? "none" : diagnosticAllAvailable.joined(separator: ", "))")
+            
+            // Pattern 4: Check availability first
+            print("\n4. Check availability pattern:")
+            let availableConfigs = await manager.getAvailableConfigurations(for: testCoordinate)
+            for configName in availableConfigs {
+                if let tileData = await manager.getTileData(for: testCoordinate, from: configName) {
+                    print("   Config '\(configName)' has tile: \(tileData.count) bytes")
+                }
+            }
+            
+        } catch {
+            print("Tile retrieval patterns error: \(error.localizedDescription)")
+        }
+    }
 }
 
 // MARK: - Custom Progress Observer for Examples

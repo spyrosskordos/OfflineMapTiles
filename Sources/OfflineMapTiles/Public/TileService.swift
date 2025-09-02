@@ -47,25 +47,25 @@ public final class TileService: @unchecked Sendable {
     
     // MARK: - Core Multi-Server API
     
-    /// Get a tile from a specific server configuration
+    /// Get a cached tile from a specific server configuration
     /// - Parameters:
     ///   - coordinate: The tile coordinate
     ///   - serverName: The server configuration name
-    /// - Returns: Tile data if successful, nil if failed
+    /// - Returns: Cached tile data if available, nil if not cached
     public func getTile(for coordinate: TileCoordinate, from serverName: String) async -> Data? {
-        guard let serverConfig = serverConfigs[serverName] else {
+        guard serverConfigs[serverName] != nil else {
             logger.warning("Server '\(serverName)' not found. Available: \(availableServers)")
             return nil
         }
         
-        // Check cache first
+        // Only return cached tiles - no automatic downloading
         if let cachedTile = await storage.getTile(coordinate: coordinate, namespace: serverName) {
             logger.debug("Retrieved cached tile (\(coordinate.x), \(coordinate.y), \(coordinate.zoom)) from '\(serverName)'")
             return cachedTile
         }
         
-        // Download if not cached
-        return await downloadAndCacheTile(coordinate: coordinate, serverConfig: serverConfig)
+        logger.debug("Tile (\(coordinate.x), \(coordinate.y), \(coordinate.zoom)) not found in cache for '\(serverName)'")
+        return nil
     }
     
     /// Get a tile with fallback - tries servers in order until one succeeds

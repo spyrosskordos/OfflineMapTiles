@@ -37,16 +37,16 @@ let stamenTile = await tileService.getTile(for: coordinate, from: "stamen")
 
 ### Tile Retrieval
 ```swift
-// Get tile from specific server (cache-first, downloads if needed)
+// Get cached tile from specific server (cache-only, no automatic downloads)
 getTile(for: coordinate, from: serverName) -> Data?
 
-// Try multiple servers in priority order
+// Try multiple servers in priority order (cache-only)
 getTileWithFallback(for: coordinate, serverPriority: [String]) -> (Data?, String?)
 
-// Force download from specific server
+// Force download from specific server (explicit download)
 downloadTile(for: coordinate, from: serverName) -> Data?
 
-// Get only from cache, no download
+// Get only from cache, no download (same as getTile)
 getCachedTile(for: coordinate, from: serverName) -> Data?
 
 // Check if tile exists in cache
@@ -122,18 +122,38 @@ if let tile = tile {
 }
 ```
 
-### Pattern 2: Smart Caching
+### Pattern 2: Explicit Download Workflow
 ```swift
-// Check cache first to avoid unnecessary downloads
-if await tileService.hasCachedTile(for: coordinate, from: "fast-server") {
-    tile = await tileService.getCachedTile(for: coordinate, from: "fast-server")
+// 1. Check cache first (getTile only returns cached tiles)
+if let cachedTile = await tileService.getTile(for: coordinate, from: "server") {
+    // Use cached tile
+    processTile(cachedTile)
 } else {
-    // Only download if not cached
-    tile = await tileService.downloadTile(for: coordinate, from: "fast-server")
+    // 2. Explicitly download if needed
+    if let downloadedTile = await tileService.downloadTile(for: coordinate, from: "server") {
+        // Use downloaded tile (automatically cached)
+        processTile(downloadedTile)
+    } else {
+        // Handle failure
+        showPlaceholder()
+    }
 }
 ```
 
-### Pattern 3: Multi-Server Download
+### Pattern 3: Simplified Cache Check
+```swift
+// Alternative: Use hasCachedTile for clearer intent
+if await tileService.hasCachedTile(for: coordinate, from: "server") {
+    let tile = await tileService.getTile(for: coordinate, from: "server")
+    processTile(tile!)
+} else {
+    // Explicitly download
+    let tile = await tileService.downloadTile(for: coordinate, from: "server")
+    processTile(tile)
+}
+```
+
+### Pattern 4: Multi-Server Download
 ```swift
 // Download same area from multiple servers simultaneously 
 let results = await tileService.downloadTiles(
@@ -146,7 +166,7 @@ let results = await tileService.downloadTiles(
 )
 ```
 
-### Pattern 4: Cache Management
+### Pattern 5: Cache Management
 ```swift
 // Monitor cache usage
 let sizes = await tileService.getCacheSizes()

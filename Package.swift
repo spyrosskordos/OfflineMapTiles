@@ -15,6 +15,9 @@ let package = Package(
         .library(
             name: "OfflineMapTiles",
             targets: ["OfflineMapTiles"]),
+        .executable(
+            name: "TestSimplified",
+            targets: ["TestSimplified"]),
     ],
     dependencies: [
         // Add dependencies here if needed in the future
@@ -31,6 +34,11 @@ let package = Package(
                 .enableUpcomingFeature("ImplicitOpenExistentials"),
                 .enableUpcomingFeature("StrictConcurrency"),
             ]
+        ),
+        .executableTarget(
+            name: "TestSimplified",
+            dependencies: ["OfflineMapTiles"],
+            path: "Sources/TestSimplified"
         ),
         .testTarget(
             name: "OfflineMapTilesTests",

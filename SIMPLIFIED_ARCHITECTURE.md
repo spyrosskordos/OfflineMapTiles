@@ -74,22 +74,15 @@ await tileService.hasCachedTile(for: coordinate)  // Check if cached
 
 ### No More Configuration Conflicts
 
-#### Old Complex Way (Conflict-Prone)
+#### Clean, Direct Approach (Conflict-Free)
 ```swift
-let sdk = UnifiedOfflineMapTilesSDK()
-let manager = try await sdk.createManager(
-    with: [osm, cartodb],
-    downloadStrategy: .concurrent,
-    storageStrategy: .separate,  // Still conflicts!
-    progressStrategy: .detailed
-)
-let tile = await manager.getTileData(for: coordinate, from: "OpenStreetMap")
-```
+let tileService = try TileService(configs: [.openStreetMap, .cartoDB])
 
-#### New Simple Way (Conflict-Free)
-```swift
-let osmService = try TileService(serverConfig: .openStreetMap)
-let tile = await osmService.getTile(for: coordinate)
+// Get cached tile (explicit, no automatic downloads)
+let tile = await tileService.getTile(for: coordinate, from: "OpenStreetMap")
+
+// Or explicitly download when needed  
+let downloadedTile = await tileService.downloadTile(for: coordinate, from: "OpenStreetMap")
 ```
 
 ### Architecture Benefits

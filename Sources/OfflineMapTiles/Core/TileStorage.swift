@@ -1,22 +1,18 @@
 import Foundation
 
-/// Simple, focused tile storage implementation
-/// Follows Single Responsibility Principle: only handles tile persistence
+/// Simple tile storage that uses key-based file storage
 public final class TileStorage: @unchecked Sendable {
     
     // MARK: - Properties
     
-    private let namespace: String
     private let fileManager: FileManager
     private let baseDirectory: URL
     private let logger: Logger
     
     // MARK: - Initialization
     
-    /// Create tile storage with a specific namespace to prevent conflicts
-    /// - Parameter namespace: Unique namespace for this storage instance
-    public init(namespace: String) throws {
-        self.namespace = namespace
+    /// Create tile storage
+    public init() throws {
         self.fileManager = FileManager.default
         self.logger = Logger.shared
         
@@ -28,28 +24,26 @@ public final class TileStorage: @unchecked Sendable {
             create: true
         )
         
-        self.baseDirectory = cacheDir
-            .appendingPathComponent("OfflineMapTiles")
-            .appendingPathComponent(namespace)
+        self.baseDirectory = cacheDir.appendingPathComponent("OfflineMapTiles")
         
-        // Ensure directory exists
+        // Create base directory
         try fileManager.createDirectory(
             at: baseDirectory,
             withIntermediateDirectories: true,
             attributes: nil
         )
         
-        logger.debug("TileStorage initialized with namespace '\(namespace)' at: \(baseDirectory.path)")
+        logger.info("TileStorage initialized at: \(baseDirectory.path)")
     }
     
     // MARK: - Core Storage Operations
     
-    /// Save tile data to storage
+    /// Save tile data using key
     /// - Parameters:
     ///   - data: Tile data to save
-    ///   - coordinate: Tile coordinate
-    public func saveTile(data: Data, coordinate: TileCoordinate) async throws {
-        let fileURL = tileURL(for: coordinate)
+    ///   - key: Tile key
+    public func saveTile(data: Data, key: String) async throws {
+        let fileURL = tileURL(for: key)
         
         // Ensure directory exists
         let directory = fileURL.deletingLastPathComponent()
@@ -59,136 +53,150 @@ public final class TileStorage: @unchecked Sendable {
             attributes: nil
         )
         
-        // Write file
-        try data.write(to: fileURL)
+        // Write file atomically
+        try data.write(to: fileURL, options: .atomic)
+        
+        logger.debug("Saved tile with key '\(key)'")
     }
     
-    /// Retrieve tile data from storage
-    /// - Parameter coordinate: Tile coordinate
+    /// Retrieve tile data using key
+    /// - Parameter key: Tile key
     /// - Returns: Tile data if exists, nil otherwise
-    public func getTile(coordinate: TileCoordinate) async -> Data? {
-        let fileURL = tileURL(for: coordinate)
+    public func getTile(key: String) async -> Data? {
+        let fileURL = tileURL(for: key)
         
         guard fileManager.fileExists(atPath: fileURL.path) else {
             return nil
         }
         
         do {
-            return try Data(contentsOf: fileURL)
+            let data = try Data(contentsOf: fileURL)
+            logger.debug("Retrieved tile with key '\(key)'")
+            return data
         } catch {
-            logger.warning("Failed to read tile file: \(error.localizedDescription)")
+            logger.warning("Failed to read tile with key '\(key)': \(error.localizedDescription)")
             return nil
         }
     }
     
-    /// Check if tile exists in storage
-    /// - Parameter coordinate: Tile coordinate
+    /// Check if tile exists using key
+    /// - Parameter key: Tile key
     /// - Returns: True if tile exists
-    public func hasTile(coordinate: TileCoordinate) async -> Bool {
-        let fileURL = tileURL(for: coordinate)
+    public func hasTile(key: String) async -> Bool {
+        let fileURL = tileURL(for: key)
         return fileManager.fileExists(atPath: fileURL.path)
     }
     
-    /// Delete a specific tile
-    /// - Parameter coordinate: Tile coordinate
-    public func deleteTile(coordinate: TileCoordinate) async throws {
-        let fileURL = tileURL(for: coordinate)
+    /// Delete a specific tile using key
+    /// - Parameter key: Tile key
+    public func deleteTile(key: String) async throws {
+        let fileURL = tileURL(for: key)
         
         guard fileManager.fileExists(atPath: fileURL.path) else {
             return // Already deleted
         }
         
         try fileManager.removeItem(at: fileURL)
+        logger.debug("Deleted tile with key '\(key)'")
     }
     
     // MARK: - Cache Management
     
-    /// Get total cache size for this namespace
+    /// Get total cache size
     /// - Returns: Size in bytes
     public func getCacheSize() async -> Int64 {
+        return calculateDirectorySize(at: baseDirectory)
+    }
+    
+    /// Get tile count
+    /// - Returns: Number of tiles
+    public func getTileCount() async -> Int {
+        return countFilesInDirectory(at: baseDirectory)
+    }
+    
+    /// Clear all tiles
+    public func clearCache() async throws {
+        // Remove all contents but keep the base directory
+        if fileManager.fileExists(atPath: baseDirectory.path) {
+            let contents = try fileManager.contentsOfDirectory(at: baseDirectory, includingPropertiesForKeys: nil)
+            for item in contents {
+                try fileManager.removeItem(at: item)
+            }
+        }
+        
+        logger.info("Cache cleared")
+    }
+    
+    // MARK: - Private Methods
+    
+    /// Generate file URL for tile key
+    private func tileURL(for key: String) -> URL {
+        // Create directory structure based on key to avoid too many files in one directory
+        let firstTwo = String(key.prefix(2))
+        let secondTwo = String(key.dropFirst(2).prefix(2))
+        let directoryPath = "\(firstTwo)/\(secondTwo)"
+        
+        return baseDirectory
+            .appendingPathComponent(directoryPath)
+            .appendingPathComponent("\(key).png")
+    }
+    
+    private func calculateDirectorySize(at url: URL) -> Int64 {
         do {
             let resourceKeys: [URLResourceKey] = [.fileSizeKey, .isDirectoryKey]
-            // Use direct directory listing instead of enumerator for async compatibility
+            let enumerator = fileManager.enumerator(
+                at: url,
+                includingPropertiesForKeys: resourceKeys,
+                options: [.skipsHiddenFiles],
+                errorHandler: { _, _ in return true }
+            )
             
             var totalSize: Int64 = 0
             
-            let contents = try fileManager.contentsOfDirectory(
-                at: baseDirectory,
-                includingPropertiesForKeys: resourceKeys,
-                options: [.skipsHiddenFiles]
-            )
-            
-            for fileURL in contents {
-                let resourceValues = try fileURL.resourceValues(forKeys: Set(resourceKeys))
-                
-                if let isDirectory = resourceValues.isDirectory, !isDirectory,
-                   let fileSize = resourceValues.fileSize {
-                    totalSize += Int64(fileSize)
+            if let enumerator = enumerator {
+                for case let fileURL as URL in enumerator {
+                    let resourceValues = try fileURL.resourceValues(forKeys: Set(resourceKeys))
+                    
+                    if let isDirectory = resourceValues.isDirectory, !isDirectory,
+                       let fileSize = resourceValues.fileSize {
+                        totalSize += Int64(fileSize)
+                    }
                 }
             }
             
             return totalSize
         } catch {
-            logger.error("Failed to calculate cache size: \(error.localizedDescription)")
+            logger.error("Failed to calculate directory size: \(error.localizedDescription)")
             return 0
         }
     }
     
-    /// Get number of cached tiles
-    /// - Returns: Number of tiles
-    public func getTileCount() async -> Int {
+    private func countFilesInDirectory(at url: URL) -> Int {
         do {
             let resourceKeys: [URLResourceKey] = [.isDirectoryKey]
-            // Use direct directory listing instead of enumerator for async compatibility
+            let enumerator = fileManager.enumerator(
+                at: url,
+                includingPropertiesForKeys: resourceKeys,
+                options: [.skipsHiddenFiles],
+                errorHandler: { _, _ in return true }
+            )
             
             var count = 0
             
-            let contents = try fileManager.contentsOfDirectory(
-                at: baseDirectory,
-                includingPropertiesForKeys: resourceKeys,
-                options: [.skipsHiddenFiles]
-            )
-            
-            for fileURL in contents {
-                let resourceValues = try fileURL.resourceValues(forKeys: Set(resourceKeys))
-                
-                if let isDirectory = resourceValues.isDirectory, !isDirectory {
-                    count += 1
+            if let enumerator = enumerator {
+                for case let fileURL as URL in enumerator {
+                    let resourceValues = try fileURL.resourceValues(forKeys: Set(resourceKeys))
+                    
+                    if let isDirectory = resourceValues.isDirectory, !isDirectory {
+                        count += 1
+                    }
                 }
             }
             
             return count
         } catch {
-            logger.error("Failed to count tiles: \(error.localizedDescription)")
+            logger.error("Failed to count files: \(error.localizedDescription)")
             return 0
         }
-    }
-    
-    /// Clear all cached tiles for this namespace
-    public func clearAll() async throws {
-        guard fileManager.fileExists(atPath: baseDirectory.path) else {
-            return // Nothing to clear
-        }
-        
-        try fileManager.removeItem(at: baseDirectory)
-        
-        // Recreate the directory
-        try fileManager.createDirectory(
-            at: baseDirectory,
-            withIntermediateDirectories: true,
-            attributes: nil
-        )
-        
-        logger.info("Cleared all tiles for namespace '\(namespace)'")
-    }
-    
-    // MARK: - Private Methods
-    
-    private func tileURL(for coordinate: TileCoordinate) -> URL {
-        // Create hierarchical structure: zoom/x/y.png
-        return baseDirectory
-            .appendingPathComponent("\(coordinate.zoom)")
-            .appendingPathComponent("\(coordinate.x)")
-            .appendingPathComponent("\(coordinate.y).png")
     }
 }

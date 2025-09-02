@@ -187,24 +187,16 @@ Sources/OfflineMapTiles/
 
 ## Migration Guide
 
-### From Complex Architecture
+### Simple, Direct Architecture  
 ```swift
-// OLD: Complex, conflict-prone
-let sdk = UnifiedOfflineMapTilesSDK()
-let manager = try await sdk.createManager(
-    with: configs,
-    downloadStrategy: .concurrent,
-    storageStrategy: .separate,
-    progressStrategy: .detailed
-)
-let tile = await manager.getTileData(for: coordinate, from: "OpenStreetMap")
-```
+// Clean, conflict-free approach
+let tileService = try TileService(configs: configs)
 
-### To New Simple Architecture  
-```swift
-// NEW: Simple, conflict-free
-let tileService = try MultiTileService(configs: configs)
+// Get cached tile (no automatic downloads)
 let tile = await tileService.getTile(for: coordinate, from: "OpenStreetMap")
+
+// Or explicitly download when needed
+let downloadedTile = await tileService.downloadTile(for: coordinate, from: "OpenStreetMap")
 ```
 
 ## Key Advantages

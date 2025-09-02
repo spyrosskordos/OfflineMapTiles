@@ -4,7 +4,8 @@
       "Bash(swift build)",
       "Bash(swift test:*)",
       "Bash(git add:*)",
-      "Read(/Users/spyridonskordos/**)"
+      "Read(/Users/spyridonskordos/**)",
+      "Bash(swift run:*)"
     ],
     "deny": [],
     "ask": []

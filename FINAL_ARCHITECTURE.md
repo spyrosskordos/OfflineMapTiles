@@ -239,31 +239,25 @@ Sources/OfflineMapTiles/
 ## Performance & Features
 
 ✅ **Concurrent Downloads**: Multiple servers download simultaneously  
-✅ **Smart Caching**: Cache-first with automatic download fallback  
+✅ **Explicit Caching**: Cache-only retrieval with explicit download control  
 ✅ **Bandwidth Control**: Per-server concurrency limits  
 ✅ **Progress Tracking**: Real-time progress per server  
 ✅ **Error Recovery**: Graceful fallbacks and error handling  
 ✅ **Memory Efficient**: Streaming downloads, minimal memory use  
 ✅ **Thread Safe**: Full async/await with proper synchronization  
 
-## Migration Benefits
+## Benefits of This Architecture
 
-**Before (Complex):**
+**Simple and Direct:**
 ```swift
-let sdk = UnifiedOfflineMapTilesSDK()
-let manager = try await sdk.createManager(
-    with: configs,
-    downloadStrategy: .concurrent,
-    storageStrategy: .separate,  // Still had conflicts!
-    progressStrategy: .detailed
-)
-let tile = await manager.getTileData(for: coordinate, from: "server")
-```
-
-**After (Simple):**
-```swift
+// Create service with multiple servers
 let tileService = try TileService(configs: configs)
+
+// Get cached tiles (explicit, no automatic downloads)
 let tile = await tileService.getTile(for: coordinate, from: "server")
+
+// Explicitly download when needed
+let downloadedTile = await tileService.downloadTile(for: coordinate, from: "server")
 ```
 
 ## Summary

@@ -133,13 +133,15 @@ public final class TileService: @unchecked Sendable {
                     defer { Task { await semaphore.signal() } }
                     
                     guard let self = self else { return false }
+                    let isTMSFormat = urlTemplate.contains("{-y}")
+                    let y = isTMSFormat ? (1 << coordinate.zoom) - 1 - coordinate.y : coordinate.y
                     
-                    let url = urlTemplate
-                        .replacingOccurrences(of: "{z}", with: "\(coordinate.zoom)")
-                        .replacingOccurrences(of: "{x}", with: "\(coordinate.x)")
-                        .replacingOccurrences(of: "{y}", with: "\(coordinate.y)")
-                    
-                    let success = await self.downloadTile(for: coordinate, from: url) != nil
+                    let urlString = urlTemplate
+                        .replacingOccurrences(of: "{z}", with: String(coordinate.zoom))
+                        .replacingOccurrences(of: "{x}", with: String(coordinate.x))
+                        .replacingOccurrences(of: "{-y}", with: String(y))
+                        .replacingOccurrences(of: "{y}", with: String(y))
+                    let success = await self.downloadTile(for: coordinate, from: urlString) != nil
                     return success
                 }
             }

@@ -142,27 +142,6 @@ public final class TileService: @unchecked Sendable {
         return result
     }
     
-    /// Download tiles for map bounds and zoom range (single URL template convenience method)
-    /// - Parameters:
-    ///   - bounds: Geographic boundaries to download
-    ///   - zoomRange: Range of zoom levels to download
-    ///   - urlTemplate: URL template for tiles (with {z}, {x}, {y} placeholders)
-    ///   - progressHandler: Optional progress callback
-    /// - Returns: Number of successful downloads
-    @discardableResult
-    public func download(
-        bounds: MapBounds,
-        zoomRange: ClosedRange<Int>,
-        urlTemplate: String,
-        progressHandler: (@Sendable (DownloadProgress) -> Void)? = nil
-    ) async -> Int {
-        return await download(
-            bounds: bounds,
-            zoomRange: zoomRange,
-            urlTemplates: [urlTemplate],
-            progressHandler: progressHandler
-        )
-    }
     
     /// Download single tile from URL and cache
     /// - Parameters:

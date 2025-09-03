@@ -48,38 +48,48 @@ public final class TileService: @unchecked Sendable {
     /// - Parameters:
     ///   - bounds: Geographic boundaries to download
     ///   - zoomRange: Range of zoom levels to download
-    ///   - urlTemplate: URL template for tiles (with {z}, {x}, {y} placeholders)
+    ///   - urlTemplates: URL templates for tiles (with {z}, {x}, {y} placeholders)
     ///   - progressHandler: Optional progress callback
     /// - Returns: Number of successful downloads
     @discardableResult
     public func download(
         bounds: MapBounds,
         zoomRange: ClosedRange<Int>,
-        urlTemplate: String,
+        urlTemplates: [String],
         progressHandler: (@Sendable (DownloadProgress) -> Void)? = nil
     ) async -> Int {
         // Cancel any existing download
         currentDownloadTask?.cancel()
         
         let downloadTask = Task {
-            // Calculate total tiles across all zoom levels
-            var allCoordinates: [TileCoordinate] = []
+            // Calculate coordinates for each zoom level
+            var coordinatesByZoom: [Int: [TileCoordinate]] = [:]
             for zoom in zoomRange {
                 let coordinates = calculator.calculateTilesForZoom(bounds: bounds, zoom: zoom)
-                allCoordinates.append(contentsOf: coordinates)
+                coordinatesByZoom[zoom] = coordinates
             }
             
-            let totalTiles = allCoordinates.count
+            // Create download tasks for all combinations of coordinates and URL templates
+            var allDownloadTasks: [(coordinate: TileCoordinate, urlTemplate: String)] = []
+            for (_, coordinates) in coordinatesByZoom {
+                for coordinate in coordinates {
+                    for urlTemplate in urlTemplates {
+                        allDownloadTasks.append((coordinate: coordinate, urlTemplate: urlTemplate))
+                    }
+                }
+            }
+            
+            let totalTiles = allDownloadTasks.count
             var totalCompleted = 0
             var totalSuccessful = 0
             
-            logger.info("Starting download: \(totalTiles) tiles across zoom levels \(zoomRange.lowerBound)-\(zoomRange.upperBound)")
+            logger.info("Starting download: \(totalTiles) tiles (\(coordinatesByZoom.values.map(\.count).reduce(0, +)) unique coordinates × \(urlTemplates.count) templates) across zoom levels \(zoomRange.lowerBound)-\(zoomRange.upperBound)")
             
             // Download all tiles with total progress tracking
             await withTaskGroup(of: Bool.self) { group in
                 let semaphore = AsyncSemaphore(value: 10) // Limit concurrent downloads
                 
-                for coordinate in allCoordinates {
+                for downloadTask in allDownloadTasks {
                     if Task.isCancelled { break }
                     
                     group.addTask { [weak self] in
@@ -88,6 +98,9 @@ public final class TileService: @unchecked Sendable {
                         
                         guard let self = self else { return false }
                         guard !Task.isCancelled else { return false }
+                        
+                        let coordinate = downloadTask.coordinate
+                        let urlTemplate = downloadTask.urlTemplate
                         
                         let isTMSFormat = urlTemplate.contains("{-y}")
                         let y = isTMSFormat ? (1 << coordinate.zoom) - 1 - coordinate.y : coordinate.y
@@ -108,7 +121,7 @@ public final class TileService: @unchecked Sendable {
                         totalSuccessful += 1
                     }
                     
-                    // Report overall progress across all zoom levels
+                    // Report overall progress across all zoom levels and templates
                     let progress = DownloadProgress(
                         totalTiles: totalTiles,
                         downloadedTiles: totalSuccessful,
@@ -127,6 +140,28 @@ public final class TileService: @unchecked Sendable {
         currentDownloadTask = nil
         
         return result
+    }
+    
+    /// Download tiles for map bounds and zoom range (single URL template convenience method)
+    /// - Parameters:
+    ///   - bounds: Geographic boundaries to download
+    ///   - zoomRange: Range of zoom levels to download
+    ///   - urlTemplate: URL template for tiles (with {z}, {x}, {y} placeholders)
+    ///   - progressHandler: Optional progress callback
+    /// - Returns: Number of successful downloads
+    @discardableResult
+    public func download(
+        bounds: MapBounds,
+        zoomRange: ClosedRange<Int>,
+        urlTemplate: String,
+        progressHandler: (@Sendable (DownloadProgress) -> Void)? = nil
+    ) async -> Int {
+        return await download(
+            bounds: bounds,
+            zoomRange: zoomRange,
+            urlTemplates: [urlTemplate],
+            progressHandler: progressHandler
+        )
     }
     
     /// Download single tile from URL and cache

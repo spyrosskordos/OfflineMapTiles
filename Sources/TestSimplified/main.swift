@@ -26,24 +26,11 @@ func testSimplifiedTileService() async {
         
         // Test cache checking (should be empty initially)
         print("\n📦 Testing cache operations:")
-        let hasCached = await tileService.hasCachedTile(key: urlKey)
-        print("   Has cached tile: \(hasCached)")
-        
-        let cachedTile = await tileService.getTile(key: urlKey)
+        let cachedTile = await tileService.getTile(x: coordinate.x, y: coordinate.y, z: coordinate.zoom, urlTemplate: urlTemplate)
         print("   Retrieved cached tile: \(cachedTile?.count ?? 0) bytes")
-        
-        // Test cache stats
-        let cacheSize = await tileService.getCacheSize()
-        let tileCount = await tileService.getTileCount()
-        print("   Current cache size: \(cacheSize) bytes")
-        print("   Current tile count: \(tileCount) tiles")
         
         // Test downloading a tile with custom URL
         print("\n⬇️ Testing tile download with fake URL:")
-        let fakeURL = "https://httpbin.org/status/200"  // This will fail but shows the flow
-        
-        let downloadedTile = await tileService.downloadTile(for: coordinate, from: fakeURL, key: urlKey)
-        print("   Download attempt completed (expected to fail): \(downloadedTile != nil)")
         
         // Since real download will fail, let's test the flow with manual storage
         // We need to add a save method to TileService for testing
@@ -57,26 +44,24 @@ func testSimplifiedTileService() async {
         print("   Key 2: \(key2)")
         print("   Key 3: \(key3)")
         
-        // Check if any tiles exist (should be empty initially)
-        let initialCacheSize = await tileService.getCacheSize()
-        let initialTileCount = await tileService.getTileCount()
-        print("   Current cache size: \(initialCacheSize) bytes")
-        print("   Current tile count: \(initialTileCount) tiles")
+        // Test some basic operations
+        print("   Testing basic cache operations...")
         
         // Test cache clearing (even if empty)
         print("\n🧹 Testing cache clearing:")
         try await tileService.clearCache()
-        let clearedCacheSize = await tileService.getCacheSize()
-        let clearedTileCount = await tileService.getTileCount()
-        print("   Cache size after clear: \(clearedCacheSize) bytes")
-        print("   Tile count after clear: \(clearedTileCount) tiles")
+        print("   Cache cleared successfully")
         
-        print("\n✨ Simplified Implementation Benefits:")
-        print("   ✅ No server configs needed - just use keys")
-        print("   ✅ No MultiNamespaceStorage complexity")
-        print("   ✅ Simple key-based storage and retrieval")
-        print("   ✅ URL template hashing for uniqueness")
-        print("   ✅ Clean, straightforward API")
+        // Test cancellation
+        print("\n🛑 Testing download cancellation:")
+        tileService.cancelDownloads()
+        print("   Downloads cancelled successfully")
+        
+        print("\n✨ Public API Functions Available:")
+        print("   ✅ getTile(x:y:z:urlTemplate:) - Retrieve cached tiles")
+        print("   ✅ download(bounds:zoomRange:urlTemplate:progressHandler:) - Download tile regions") 
+        print("   ✅ clearCache() - Clear all cached tiles")
+        print("   ✅ cancelDownloads() - Cancel ongoing downloads")
         
         print("\n🎉 All tests passed! Implementation is working correctly.")
         

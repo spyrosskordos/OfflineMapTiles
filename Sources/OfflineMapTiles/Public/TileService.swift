@@ -11,6 +11,7 @@ public final class TileService: @unchecked Sendable {
     private let downloader: TileDownloader
     private let calculator: TileCalculator
     private let logger: Logger
+    private var currentDownloadTask: Task<Int, Never>?
     
     // MARK: - Initialization
     
@@ -31,20 +32,110 @@ public final class TileService: @unchecked Sendable {
     
     // MARK: - Core API
     
-    /// Get cached tile using key
-    /// - Parameter key: Tile key
+    /// Get cached tile by coordinates and URL template
+    /// - Parameters:
+    ///   - x: Tile X coordinate
+    ///   - y: Tile Y coordinate
+    ///   - z: Zoom level
+    ///   - urlTemplate: URL template used for the tile
     /// - Returns: Cached tile data if available, nil if not cached
-    public func getTile(key: String) async -> Data? {
+    public func getTile(x: Int, y: Int, z: Int, urlTemplate: String) async -> Data? {
+        let key = TileKey.generateKey(z: z, x: x, y: y, urlTemplate: urlTemplate)
         return await storage.getTile(key: key)
     }
     
-    /// Download tile from URL and cache using key
+    /// Download tiles for map bounds and zoom range
+    /// - Parameters:
+    ///   - bounds: Geographic boundaries to download
+    ///   - zoomRange: Range of zoom levels to download
+    ///   - urlTemplate: URL template for tiles (with {z}, {x}, {y} placeholders)
+    ///   - progressHandler: Optional progress callback
+    /// - Returns: Number of successful downloads
+    @discardableResult
+    public func download(
+        bounds: MapBounds,
+        zoomRange: ClosedRange<Int>,
+        urlTemplate: String,
+        progressHandler: (@Sendable (DownloadProgress) -> Void)? = nil
+    ) async -> Int {
+        // Cancel any existing download
+        currentDownloadTask?.cancel()
+        
+        let downloadTask = Task {
+            // Calculate total tiles across all zoom levels
+            var allCoordinates: [TileCoordinate] = []
+            for zoom in zoomRange {
+                let coordinates = calculator.calculateTilesForZoom(bounds: bounds, zoom: zoom)
+                allCoordinates.append(contentsOf: coordinates)
+            }
+            
+            let totalTiles = allCoordinates.count
+            var totalCompleted = 0
+            var totalSuccessful = 0
+            
+            logger.info("Starting download: \(totalTiles) tiles across zoom levels \(zoomRange.lowerBound)-\(zoomRange.upperBound)")
+            
+            // Download all tiles with total progress tracking
+            await withTaskGroup(of: Bool.self) { group in
+                let semaphore = AsyncSemaphore(value: 10) // Limit concurrent downloads
+                
+                for coordinate in allCoordinates {
+                    if Task.isCancelled { break }
+                    
+                    group.addTask { [weak self] in
+                        await semaphore.wait()
+                        defer { Task { await semaphore.signal() } }
+                        
+                        guard let self = self else { return false }
+                        guard !Task.isCancelled else { return false }
+                        
+                        let isTMSFormat = urlTemplate.contains("{-y}")
+                        let y = isTMSFormat ? (1 << coordinate.zoom) - 1 - coordinate.y : coordinate.y
+                        
+                        let urlString = urlTemplate
+                            .replacingOccurrences(of: "{z}", with: String(coordinate.zoom))
+                            .replacingOccurrences(of: "{x}", with: String(coordinate.x))
+                            .replacingOccurrences(of: "{-y}", with: String(y))
+                            .replacingOccurrences(of: "{y}", with: String(y))
+                        let success = await self.downloadTile(for: coordinate, from: urlString, urlTemplate: urlTemplate) != nil
+                        return success
+                    }
+                }
+                
+                for await success in group {
+                    totalCompleted += 1
+                    if success {
+                        totalSuccessful += 1
+                    }
+                    
+                    // Report overall progress across all zoom levels
+                    let progress = DownloadProgress(
+                        totalTiles: totalTiles,
+                        downloadedTiles: totalSuccessful,
+                        failedTiles: totalCompleted - totalSuccessful
+                    )
+                    progressHandler?(progress)
+                }
+            }
+            
+            logger.info("Download completed: \(totalSuccessful)/\(totalTiles) tiles downloaded successfully")
+            return totalSuccessful
+        }
+        
+        currentDownloadTask = downloadTask
+        let result = await downloadTask.value
+        currentDownloadTask = nil
+        
+        return result
+    }
+    
+    /// Download single tile from URL and cache
     /// - Parameters:
     ///   - coordinate: Tile coordinate
     ///   - url: Tile URL to download from
-    ///   - key: Key to store tile under (optional, generates from coordinate if not provided)
+    ///   - urlTemplate: Original URL template for key generation
     /// - Returns: Tile data if successful, nil if failed
-    public func downloadTile(for coordinate: TileCoordinate, from url: String, key: String? = nil) async -> Data? {
+    private func downloadTile(for coordinate: TileCoordinate, from url: String, urlTemplate: String) async -> Data? {
         guard let tileURL = URL(string: url) else {
             logger.error("Invalid URL: \(url)")
             return nil
@@ -54,8 +145,7 @@ public final class TileService: @unchecked Sendable {
         
         switch result {
         case .success(let data):
-            // Generate key if not provided
-            let tileKey = key ?? TileKey.generateKey(z: coordinate.zoom, x: coordinate.x, y: coordinate.y, urlTemplate: url)
+            let tileKey = TileKey.generateKey(z: coordinate.zoom, x: coordinate.x, y: coordinate.y, urlTemplate: urlTemplate)
             
             do {
                 try await storage.saveTile(data: data, key: tileKey)
@@ -63,7 +153,7 @@ public final class TileService: @unchecked Sendable {
                 return data
             } catch {
                 logger.error("Failed to cache tile: \(error.localizedDescription)")
-                return data // Return the data even if caching failed
+                return data
             }
             
         case .failure(let error):
@@ -72,111 +162,41 @@ public final class TileService: @unchecked Sendable {
         }
     }
     
-    /// Check if tile exists in cache using key
-    /// - Parameter key: Tile key
+    /// Check if tile exists in cache by coordinates and URL template
+    /// - Parameters:
+    ///   - x: Tile X coordinate
+    ///   - y: Tile Y coordinate
+    ///   - z: Zoom level
+    ///   - urlTemplate: URL template used for the tile
     /// - Returns: True if tile exists in cache
-    public func hasCachedTile(key: String) async -> Bool {
+    private func hasCachedTile(x: Int, y: Int, z: Int, urlTemplate: String) async -> Bool {
+        let key = TileKey.generateKey(z: z, x: x, y: y, urlTemplate: urlTemplate)
         return await storage.hasTile(key: key)
     }
     
-    /// Delete a specific tile using key
-    /// - Parameter key: Tile key
-    public func deleteTile(key: String) async throws {
+    /// Delete a specific tile by coordinates and URL template
+    /// - Parameters:
+    ///   - x: Tile X coordinate
+    ///   - y: Tile Y coordinate
+    ///   - z: Zoom level
+    ///   - urlTemplate: URL template used for the tile
+    private func deleteTile(x: Int, y: Int, z: Int, urlTemplate: String) async throws {
+        let key = TileKey.generateKey(z: z, x: x, y: y, urlTemplate: urlTemplate)
         try await storage.deleteTile(key: key)
     }
     
-    // MARK: - Batch Operations
-    
-    /// Download tiles for an area
-    /// - Parameters:
-    ///   - bounds: Geographic boundaries
-    ///   - zoomLevel: Zoom level to download
-    ///   - urlTemplate: URL template for tiles (with {z}, {x}, {y} placeholders)
-    ///   - progressHandler: Optional progress callback
-    /// - Returns: Number of successful downloads
-    @discardableResult
-    public func downloadTiles(
-        in bounds: MapBounds,
-        at zoomLevel: Int,
-        from urlTemplate: String,
-        progressHandler: (@Sendable (DownloadProgress) -> Void)? = nil
-    ) async -> Int {
-        let coordinates = calculator.calculateTilesForZoom(bounds: bounds, zoom: zoomLevel)
-        return await downloadTiles(coordinates: coordinates, from: urlTemplate, progressHandler: progressHandler)
-    }
-    
-    /// Download specific tiles
-    /// - Parameters:
-    ///   - coordinates: Array of tile coordinates
-    ///   - urlTemplate: URL template for tiles (with {z}, {x}, {y} placeholders)
-    ///   - progressHandler: Optional progress callback
-    /// - Returns: Number of successful downloads
-    @discardableResult
-    public func downloadTiles(
-        coordinates: [TileCoordinate],
-        from urlTemplate: String,
-        progressHandler: (@Sendable (DownloadProgress) -> Void)? = nil
-    ) async -> Int {
-        let total = coordinates.count
-        var completed = 0
-        var successful = 0
-        
-        logger.info("Starting download: \(coordinates.count) tiles from \(urlTemplate)")
-        
-        // Download with concurrency control
-        await withTaskGroup(of: Bool.self) { group in
-            let semaphore = AsyncSemaphore(value: 10) // Limit concurrent downloads
-            
-            for coordinate in coordinates {
-                group.addTask { [weak self] in
-                    await semaphore.wait()
-                    defer { Task { await semaphore.signal() } }
-                    
-                    guard let self = self else { return false }
-                    let isTMSFormat = urlTemplate.contains("{-y}")
-                    let y = isTMSFormat ? (1 << coordinate.zoom) - 1 - coordinate.y : coordinate.y
-                    
-                    let urlString = urlTemplate
-                        .replacingOccurrences(of: "{z}", with: String(coordinate.zoom))
-                        .replacingOccurrences(of: "{x}", with: String(coordinate.x))
-                        .replacingOccurrences(of: "{-y}", with: String(y))
-                        .replacingOccurrences(of: "{y}", with: String(y))
-                    let success = await self.downloadTile(for: coordinate, from: urlString) != nil
-                    return success
-                }
-            }
-            
-            for await success in group {
-                completed += 1
-                if success {
-                    successful += 1
-                }
-                
-                // Report progress
-                let progress = DownloadProgress(
-                    totalTiles: total,
-                    downloadedTiles: successful,
-                    failedTiles: completed - successful
-                )
-                progressHandler?(progress)
-            }
-        }
-        
-        logger.info("Download completed: \(successful)/\(total) tiles downloaded successfully")
-        return successful
-    }
     
     // MARK: - Cache Management
     
     /// Get total cache size
     /// - Returns: Cache size in bytes
-    public func getCacheSize() async -> Int64 {
+    private func getCacheSize() async -> Int64 {
         return await storage.getCacheSize()
     }
     
     /// Get total tile count
     /// - Returns: Number of cached tiles
-    public func getTileCount() async -> Int {
+    private func getTileCount() async -> Int {
         return await storage.getTileCount()
     }
     
@@ -184,6 +204,15 @@ public final class TileService: @unchecked Sendable {
     public func clearCache() async throws {
         try await storage.clearCache()
         logger.info("Cache cleared")
+    }
+    
+    /// Cancel all ongoing downloads
+    public func cancelDownloads() {
+        if let downloadTask = currentDownloadTask {
+            logger.info("Cancelling ongoing download")
+            downloadTask.cancel()
+            currentDownloadTask = nil
+        }
     }
     
 }
